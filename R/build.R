@@ -1,4 +1,5 @@
 #load in data
+library(textstem)
 tweets <- read_csv(here("Data/cyberbullying_tweets.csv"))
 data("stop_words")
 
@@ -22,7 +23,7 @@ tweets$cleaned_tweet <- gsub("\\s+$", "", tweets$cleaned_tweet)
 tweets$cleaned_tweet <- gsub("[ |\t]+", " ", tweets$cleaned_tweet)
 
 tweets$stripped_tweets <- removeWords(tweets$cleaned_tweet, c(stop_words$word,"im","ur","isnt","dont","youre","doesnt","lol","lmfao"))
-
+tweets$stripped_tweets <- lemmatize_strings(tweets$stripped_tweets)
 
 ggplot(data = tweets, aes(x=cyberbullying_type,fill = cyberbullying_type))+
   geom_bar()+
@@ -40,7 +41,7 @@ ggplot(data = tweets, aes(x=cyberbullying_type,fill = cyberbullying_type))+
 words <- tweets %>% 
   unnest_tokens(word,stripped_tweets)
 
-words_count <- words %>% count(word,sort = TRUE) %>% filter(n>10)
+words_count <- words %>% count(word,sort = TRUE)
 
 words_notcb <- words %>% filter(cyberbullying_type == "not_cyberbullying") %>% count(word,sort = TRUE)
 words_gender <- words %>% filter(cyberbullying_type == "gender") %>% count(word,sort = TRUE)
