@@ -26,7 +26,12 @@ librarian::shelf(
   stargazer,
   snakecase,
   gtsummary,
-  vtable
+  vtable,
+  tidytext,
+  stopwords,
+  tm,
+  wordcloud2,
+  wordcloud
 )
 
 # tell here where we are so we can use it elsewhere
