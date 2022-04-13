@@ -1,5 +1,6 @@
 #load in data
 library(textstem)
+library(naivebayes)
 tweets <- read_csv(here("Data/cyberbullying_tweets.csv"))
 data("stop_words")
 
@@ -58,7 +59,42 @@ wordcloud2(data = words_age, size = 1, color = 'random-dark')
 wordcloud2(data = words_ethnicity, size = 1, color = 'random-dark')
 wordcloud2(data = words_othercb, size = 1, color = 'random-dark')
 
+test <- Corpus(VectorSource(tweets$stripped_tweets))
 
+test_2 <- DocumentTermMatrix(test)
+inspect(test_2)
+test_2 <- removeSparseTerms(test_2,.05)
+inspect(test_2)
+
+test_3 <- as(as.matrix(test_2),"sparseMatrix")
+
+X_NB = test_3  # feature matrix
+y_NB = factor(tweets$cyberbullying_type)
+
+N = length(y_NB)
+train_frac = 0.8
+train_set = sample.int(N, floor(train_frac*N)) %>% sort
+test_set = setdiff(1:N, train_set)
+
+X_train = X_NB[train_set,]
+X_test = X_NB[test_set,]
+
+y_train = y_NB[train_set]
+y_test = y_NB[test_set]
+
+# train the model: this function is in the naivebayes package.
+# Check out "congress109_bayes_detailed" if you want to see a 
+# version where we step through these calculations "by hand", i.e.
+# not relying on a package to build the classifier.
+nb_model = multinomial_naive_bayes(x = X_train, y = y_train)
+
+y_test_pred = predict(nb_model, X_test)
+
+# look at the confusion matrix
+table(y_test, y_test_pred)
+
+# overall test-set accuracy
+sum(diag(table(y_test, y_test_pred)))/length(y_test)
 
 
 
