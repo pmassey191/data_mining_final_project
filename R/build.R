@@ -1,5 +1,6 @@
 #load in data
 library(textstem)
+library(randomForest)
 library(naivebayes)
 tweets <- read_csv(here("Data/cyberbullying_tweets.csv"))
 data("stop_words")
@@ -23,7 +24,7 @@ tweets$cleaned_tweet <- gsub("^\\s+", "", tweets$cleaned_tweet)
 tweets$cleaned_tweet <- gsub("\\s+$", "", tweets$cleaned_tweet)
 tweets$cleaned_tweet <- gsub("[ |\t]+", " ", tweets$cleaned_tweet)
 
-tweets$stripped_tweets <- removeWords(tweets$cleaned_tweet, c(stop_words$word,"im","ur","isnt","dont","youre","doesnt","lol","lmfao"))
+tweets$stripped_tweets <- removeWords(tweets$cleaned_tweet, c(stop_words$word, "yup","youve", "im","ur","isnt","dont","youre","doesnt","lol","lmfao"))
 tweets$stripped_tweets <- lemmatize_strings(tweets$stripped_tweets)
 
 ggplot(data = tweets, aes(x=cyberbullying_type,fill = cyberbullying_type))+
@@ -32,6 +33,7 @@ ggplot(data = tweets, aes(x=cyberbullying_type,fill = cyberbullying_type))+
 
 tweets <- tweets %>% 
   filter(stripped_tweets!="")
+
 
 ggplot(data = tweets, aes(x=cyberbullying_type,fill = cyberbullying_type))+
   geom_bar()+
@@ -59,16 +61,17 @@ wordcloud2(data = words_age, size = 1, color = 'random-dark')
 wordcloud2(data = words_ethnicity, size = 1, color = 'random-dark')
 wordcloud2(data = words_othercb, size = 1, color = 'random-dark')
 
-test <- Corpus(VectorSource(tweets$stripped_tweets))
+stripped_tweets <- Corpus(VectorSource(tweets$stripped_tweets))
 
-test_2 <- DocumentTermMatrix(test)
-inspect(test_2)
-test_2 <- removeSparseTerms(test_2,.05)
-inspect(test_2)
+stripped_tweets <- DocumentTermMatrix(stripped_tweets)
+inspect(stripped_tweets)
+stripped_tweets <- removeSparseTerms(stripped_tweets,.999)
 
-test_3 <- as(as.matrix(test_2),"sparseMatrix")
+stripped_tweets <- stripped_tweets %>% as.matrix() %>% as.data.frame() %>% filter(rowSums(stripped_tweets)!=0) %>% as.matrix()
 
-X_NB = test_3  # feature matrix
+stripped_tweets_sparseMatrix <- as(as.matrix(stripped_tweets),"sparseMatrix")
+
+X_NB = stripped_tweets_sparseMatrix  # feature matrix
 y_NB = factor(tweets$cyberbullying_type)
 
 N = length(y_NB)
@@ -96,12 +99,23 @@ table(y_test, y_test_pred)
 # overall test-set accuracy
 sum(diag(table(y_test, y_test_pred)))/length(y_test)
 
+Z = stripped_tweets/rowSums(stripped_tweets)
+
+pc5 = prcomp(Z, scale=TRUE, rank=5)
+tweets <- tweets %>% rownames_to_column("index")
+scores <- pc5$x %>% as.data.frame() %>%  rownames_to_column("index")
+tweets_combined <- inner_join(tweets, scores)
+
+training = tweets_combined[train_set,]
+testing = 
 
 
+forest_tweets <- randomForest::randomForest(as.factor(cyberbullying_type) ~ PC1 +PC2 +PC3 + PC4 +PC5,data = tweets_combined,)
 
+plot(forest_tweets)
+varImpPlot(forest_tweets)
 
-
-
+qplot(scores[,2], scores[,3], color=as.factor(tweets_combined$cyberbullying_type), xlab='Component 1', ylab='Component 2')
 
 
 
