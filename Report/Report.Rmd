@@ -1,0 +1,266 @@
+---
+title: "Can We Predict a Bully?"
+subtitle: "A Maching Learning Approach to Tweet Classification"
+author: "Patrick Massey"
+output: pdf_document
+fig_caption: yes
+header-includes: \usepackage{float}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.pos = "H")
+#load in data
+library(tidyverse)
+library(wordcloud)
+library(tidytext)
+library(naivebayes)
+library(randomForest)
+library(textstem)
+library(tm)
+library(caret)
+library(yardstick)
+library(factoextra)
+library(knitr)
+library(kableExtra)
+tweets <- read_csv("../Data/cyberbullying_tweets.csv")
+data("stop_words")
+
+#cleaning tweets
+tweets$tweet_text <- tolower(tweets$tweet_text)
+
+tweets$cleaned_tweet <- gsub("https?://.+", "", tweets$tweet_text)
+tweets$cleaned_tweet <- gsub("@\\S*", "", tweets$cleaned_tweet) 
+tweets$cleaned_tweet <- gsub("amp", "", tweets$cleaned_tweet) 
+tweets$cleaned_tweet <- gsub("[\r\n]", "", tweets$cleaned_tweet)
+tweets$cleaned_tweet <- gsub("[[:punct:]]", "", tweets$cleaned_tweet)
+tweets$cleaned_tweet <- gsub("[^\x01-\x7F]", "", tweets$cleaned_tweet)
+tweets$cleaned_tweet <- gsub("rt", "", tweets$cleaned_tweet)
+tweets$cleaned_tweet <- gsub("\n", " ", tweets$cleaned_tweet)
+tweets$cleaned_tweet <- gsub("^\\s+", "", tweets$cleaned_tweet)
+tweets$cleaned_tweet <- gsub("\\s+$", "", tweets$cleaned_tweet)
+tweets$cleaned_tweet <- gsub("[ |\t]+", " ", tweets$cleaned_tweet)
+tweets$stripped_tweets <- removeWords(tweets$cleaned_tweet, c(stop_words$word, "yup","youve", "im","ur","isnt","dont","youre","doesnt","lol","lmfao"))
+tweets$stripped_tweets <- lemmatize_strings(tweets$stripped_tweets)
+```
+
+
+## Abstract
+Cyber bullying is a rampant problem facing kids today. As long as they have access to their phones the bullying can follow them wherever they go. In an effort to remove these messages from the public sphere I develop two models that will predict the classification of tweets. The tweets I will be analyzing have been hand classified as a type of cyber bullying or not. The first model I used was a simplistic Naive Bayes, where every unique word in the tweets was a feature. In the second model I use Principal Component Analysis to reduce the number of features and use those components in a Random Forest model. The Random Forest model performed significantly better than the Naive Bayes however both models had trouble predicating `other_cyberbullying` and `not_cyberbullying`. This is due to the vague nature of both categories and the models have trouble discerning between both. However, we have strong predictive power on the other categories. This implies that if we can classify a tweet as one of the specific categories then there is a high probability of being correct, however if it does not fit into the specific categories then it is nearly a 50/50 chance of being correct. 
+
+**Warning**: The following paper deals with cyber bullying, specifically in regard to ethnicity, religion, gender, and age. The topics discussed as well as the tables and figures presented may make some feel uncomfortable.
+
+## Introduction
+Bullying is a problem that children have always faced, however it used to be the case that there was always somewhere they could escape to. If the bullying was happening at school they were safe once they reached their house. In the era of smartphones and social media this is no longer the case. When children are connected to the internet the bullying can follow them wherever they go in the form of cyber bullying. Twitter is one of the major forms of social media that kids today use to ingest their news, share their interests, communicate with their peers, and potentially even communicate with strangers. This allows for a wide form interaction between individuals including cyber bullying. We can combat that by building a model that can accurately flag a tweet for cyber bullying, and remove the tweet. We will never be able to get rid of cyber bullying completely but if we can make the online space marginally better for at least one child then it will have been well worth the effort.
+
+
+\newpage
+
+## Methods
+In this analysis I utilize a data set of 47,692 tweets that have been identified by a human as cyber bullying or not, and if it is cyber bullying a further classification is made. A cyber bullying tweet can be classified as ethnicity, religion, gender, age, or other. This data set has been artificially created, in the sense that we have a near balanced data set as shown below, with approximately 8,000 tweets for each category. I summarize the counts of the tweets by category in Figure 1, below. 
+
+```{r,echo=FALSE,out.height="75%",out.width="75%",fig.align='center',fig.cap="Initial Tweet Distribution",out.extra=""}
+ggplot(data = tweets, aes(x=cyberbullying_type,fill = cyberbullying_type))+
+  geom_bar()+
+  theme_minimal()+
+  labs(title = "Number of Tweets by Category",x= "Cyber Bullying Type",y="Count")+
+  theme(legend.position = "none")+
+  scale_fill_viridis_d()+
+  coord_flip()
+```
+
+In order to clean the tweets, I remove any punctuation, symbols, emojis, common stop words, as well as additional words that you might see in the cyber world, such as "u" in place of "you". Additionally I also perform a lemmatization of the tweets which will transform words like "sell","selling", or "sold" into one representative word "sell". This will help increase accuracy of the model. After processing the tweets and removing any tweets that may now be completely empty we see in Figure 2 below that most of the removal happens with the `other_cyberbullying` and `not_cyberbullying` categories, meanwhile the others remain relatively unchanged. This makes sense as these two categories are the most likely to have vague and unimportant words.
+
+```{r, echo=FALSE,out.height="75%",out.width="75%",fig.align='center',fig.cap="Tweet Distribution After Cleaning",out.extra=""}
+tweets <- tweets %>% 
+  filter(stripped_tweets!="") %>% 
+  rownames_to_column("id")
+
+
+ggplot(data = tweets, aes(x=cyberbullying_type,fill = cyberbullying_type))+
+  geom_bar()+
+  theme_minimal()+
+  labs(title = "Number of Tweets by Category",x= "Cyber Bullying Type",y="Count")+
+  theme(legend.position = "none")+
+  scale_fill_viridis_d()+
+  coord_flip()
+```
+
+Before getting into the analysis, it is important to know the words that make up the tweets being analyzed. This also helps further understand the motivation. In Figure 3 below I have generated a word cloud based on tweets that have been classified as religious cyber bullying. I have also generated word clouds for the other categories which will be located in the appendix at the end.
+
+```{r,echo=FALSE, fig.cap="Cyber Bullying Tweets: Religion",out.extra="",out.height="125%",out.width="125%",fig.align='left'}
+words <- tweets %>% 
+  unnest_tokens(word,stripped_tweets)
+
+words_count <- words %>% count(word,sort = TRUE)
+words_religion <- words %>% filter(cyberbullying_type == "religion")%>% count(word,sort = TRUE)
+pal = viridis::viridis(n=20)
+wordcloud(words = words_religion$word, freq = words_religion$n, min.freq = 1,          
+          max.words=200, random.order=FALSE, rot.per=0.35,           
+          random.color = TRUE,           
+          colors=pal)
+```
+
+Now that we have an idea of what the distribution and contents of the tweets look like, we can now move on to the analysis. In order to know what methodology we need to use to analyze the data, we need to clarify the problem. Here we will be doing text analysis on a multinomial classification problem. Which is to say we are going to analyze the contents of the tweets and attempt to predict one of six categories the tweet could be classified as.
+
+When considering the model to use for this analysis, I simply asked the question of what the goal was. Here our goal is "given a combination of words, what is the classification of this tweet?". This points directly towards using a Naive Bayes model. The Naive Bayes model is an extremely popular model for doing text analysis, because of its simplicity, but also still being fairly accurate. It is especially powerful in the case of multinomial classification. Its simplicity comes from the main assumption that the features being used are independent of each other. This is probably a bit too simplistic, given a tweet is somewhat of a sentence, the words are likely not independent of each other. With the removal of stop words this may help with the independence assumption as we are now only considering words outside of filler words. In addition to the Naive Bayes model since I am not convinced that words are independent of each other, I will also be using Principal Component Analysis (PCA) in combination with a Random Forest model. Here the PCA is being used to reduce the number of features into a select number of components, I will be discussing more on the features being used later on. The Random Forest is also extremely powerful when it comes to classification problems, but does not require such strong assumptions like the Naive Bayes.
+
+
+```{r, echo=FALSE}
+#turn tweets into corpus
+stripped_tweets <- Corpus(VectorSource(tweets$stripped_tweets))
+#turn tweets into document term matrix
+stripped_tweets <- DocumentTermMatrix(stripped_tweets)
+#remove sparse terms
+stripped_tweets <- removeSparseTerms(stripped_tweets,sparse = .99)
+```
+In order to use either of these models the tweets must be in a format that is usable. I first turn the tweets into a corpus and then transform the corpus into a Document Term Matrix. The tweets have now been broken apart and for every word that appeared in a tweet it is now a feature of the data set. Every row represents a tweet and every column is a word and the values are the frequencies that each word appears in a tweet. This gives a total of 40,166 features to work with. However, there are likely some words that only appear in a handful of tweets and are likely not very useful in the analysis. After inspecting the documents, it is an extremely sparse matrix. I remove terms that are sparse in 99% of the tweets which is to say that a word must appear in about 400 tweets in order to remain. After removing sparse terms we are left with `r stripped_tweets$ncol` features. Now that we have done the feature engineering, I split the data set into training and testing sets. Using the same training set I will train both the Naive Bayes, and Random Forest model and then test on the testing set. As stated earlier for the Random Forest model I will be using PCA to reduce the number of features used. To determine the number of components to use I create a scree plot in Figure X, from the plot I see that past 15 components there is not much gain in variance explanation. Because I am not gaining much past 15 components, that is the number of components I will use for this analysis. This will reduce the number of features from `r stripped_tweets$ncol` to 15.
+
+## Results
+
+After training the models and then testing them against a separate testing set, I summarize the results in confusion matrices in Figures 4 and 5 below. On the Y axis I have plotted the observed classification, and on the X axis I have plotted the predicted classification using the relative model. Along the diagonal is the true positive matches between the actual and predicted values. I also summarize the overall accuracy of both models in Table 1 below.
+
+
+
+```{r, echo=FALSE}
+
+#clean the matrix
+stripped_tweets <- stripped_tweets %>% as.matrix() %>% as.data.frame() %>% rownames_to_column("id")
+stripped_tweets <- stripped_tweets %>%  filter(rowSums(stripped_tweets %>% select(-id))!=0)
+stripped_tweets <- stripped_tweets %>% inner_join(tweets %>% select(id,cyberbullying_type),stripped_tweets,by="id")
+
+#create feature matrix to be used for nb model
+stripped_tweets_mat <- as.matrix(stripped_tweets %>% select(-id,-cyberbullying_type))
+#make sure the column names are fine something weird was happening
+colnames(stripped_tweets) <- make.names(colnames(stripped_tweets))
+#turn the index into the rownames
+rownames(stripped_tweets) <- stripped_tweets$id
+
+```
+
+```{r,echo=FALSE}
+X_NB = stripped_tweets_mat  # feature matrix
+y_NB = factor(stripped_tweets$cyberbullying_type) 
+
+#create training and testing 
+N = length(y_NB)
+train_frac = 0.8
+train_set = sample.int(N, floor(train_frac*N)) %>% sort
+test_set = setdiff(1:N, train_set)
+
+X_train = X_NB[train_set,]
+X_test = X_NB[test_set,]
+
+y_train = y_NB[train_set]
+y_test = y_NB[test_set]
+
+nb_model = multinomial_naive_bayes(x = X_train, y = y_train)
+```
+
+```{r,echo=FALSE,fig.cap="Confusion Matrix Heatmap for Naive Bayes", warning=FALSE,message=FALSE,out.height="75%",out.width="75%",out.extra=""}
+y_hat_bayes = predict(nb_model, X_test)
+
+# look at the confusion matrix
+table_bayes <- table(y_test, y_hat_bayes)
+cmatrix_bayes <-  confusionMatrix(table_bayes)
+cm_bayes <- conf_mat(table_bayes)
+autoplot(cm_bayes,type = "heatmap")+
+  scale_fill_gradient(high = "red",low="white")+
+  labs(x="Predicted",y="Actual",title = "Confusion Matrix: Naive Bayes")+
+  scale_x_discrete(guide = guide_axis(n.dodge = 2))
+```
+From Figure 4 above we see strong initial results from the Naive Bayes. There is an overall accuracy of `r round(cmatrix_bayes$overall[1],3)`, and I break down the performance results by class in Table 2 located in the appendix. What we see is that in both the confusion matrix and Table 2, the model is not a strong predictor for `not_cyberbullying` and `other_cyberbullying`. The true positivity rate for those is `r round(as.data.frame(cmatrix_bayes$byClass)$Sensitivity[4],3)` and `r round(as.data.frame(cmatrix_bayes$byClass)$Sensitivity[5],3)` respectively. Lets see if we can improve upon this using a Random Forest with PCA. Figure 5 below summarizes the performance in the same confusion matrix format as before and Table 3 summarizes the performance results by class.
+```{r,echo=FALSE,fig.cap="Confusion Matrix Heatmap for Random Forest using PCA", warning=FALSE,message=FALSE,out.height="75%",out.width="75%",out.extra=""}
+#normalize the features
+Z = stripped_tweets %>% select(-id,-cyberbullying_type)/rowSums(stripped_tweets %>% select(-id,-cyberbullying_type))
+pca = prcomp(Z, scale=TRUE,rank = 15)
+tweets <- tweets %>% rownames_to_column("index")
+scores <- pca$x %>% as.data.frame() %>%  rownames_to_column("index")
+tweets_combined <- inner_join(tweets, scores)
+training = tweets_combined[train_set,]
+testing = tweets_combined[test_set,]
+
+forest_tweets <- randomForest(as.factor(cyberbullying_type) ~ PC1+PC2+PC3+PC4+PC5+PC6+PC7
+                              +PC8+PC9+PC10+PC11+PC12+PC13+PC14+PC15, data = training)
+y_hat_forest = predict(forest_tweets,testing)
+
+# look at the confusion matrix
+table_forest <- table(y_test, y_hat_forest)
+cmatrix_forest <-  confusionMatrix(table_forest)
+cm_forest <- conf_mat(table_forest)
+autoplot(cm_forest,type = "heatmap")+
+  scale_fill_gradient(high = "red",low="white")+
+  labs(x="Predicted",y="Actual",title = "Confusion Matrix: Random Forest")+
+  scale_x_discrete(guide = guide_axis(n.dodge = 2))
+```
+```{r,echo=FALSE}
+
+tbl_acc <- tribble(
+~"", ~"Naive Bayes",~"Random Forest",
+"Accuracy", cmatrix_bayes$overall[1],cmatrix_forest$overall[1]
+)
+kbl(tbl_acc,digits = 3,caption = "Overall Accuracy") %>% kable_styling(latex_options = c("hold_position"))
+```
+From Figure 5 and Table 3, we can see there is an improvement in the performance, with an overall accuracy of `r round(cmatrix_forest$overall[1],3)`. From Table 1 what we see is that the Random Forest provides a `r round((cmatrix_forest$overall[1]-cmatrix_bayes$overall[1])/cmatrix_bayes$overall[1],3)*100` percent increase in accuracy. This is a sizable increase in performance. However once again we see that the Random Forest is also not a strong predictor for `not_cyberbullying` and `other_cyberbullying`. The true positivity rate for those is `r round(as.data.frame(cmatrix_forest$byClass)$Sensitivity[4],3)` and `r round(as.data.frame(cmatrix_forest$byClass)$Sensitivity[5],3)` respectively. So although we see a large increase in other classes of tweets and improvement overall, there is still not much change in the problematic categories.
+
+## Conclusion
+
+In this analysis I have used two models to predict the cyber bullying classification of a set of tweets. The first model was a simplistic Naive Bayes model where each word was a feature. The second model used PCA to reduce the number of features to 15 components and then I used those components in a Random Forest model. The results show strong predictive power for `age`, `ethnicity`, `gender`, and `religion`. It should be noted that due to the balanced nature of the data set used in this analysis we would very likely not see such strong results when using live scraped tweets. The Random Forest performed significantly better than the Naive Bayes, albeit the Naive Bayes is a simpler and easier to implement model. The improvement in overall accuracy is significant enough to warrant the more complicated Random Forest model. However, when it comes to `other_cyberbullying` and `not_cyberbullying` both models performed roughly the same, and it essentially is a 50/50 chance of being correct. This is understandable especially once Figures 9 and 10 are considered. Figures 9 and 10 show a word cloud of `other_cyberbullying` and `not_cyberbullying` respectively. The same words appear in both figures and at a similar frequency. This will make it difficult for any Machine Learning model to discern between the two, as it seems the only thing that makes them different is the context in which they appear. In a simplistic example we may see two tweets “Fuck yeah!” and “Fuck you!”, the former is an obvious positive encounter, and the latter is a negative one. After processing a model would only see “Fuck” and “Fuck”, it would be impossible for a machine to discern between the two. That’s not to say that it is pointless to try to predict a tweets classification. We see strong predictive powers for the specific cyber bullying classifiers, so if we can classify a tweet as a specific category then there is a high probability of being correct. However, if a tweet can not be classified as a specific category, then it would require a human to understand the context.
+
+\newpage
+## Appendix
+
+```{r, echo=FALSE}
+words_notcb <- words %>% filter(cyberbullying_type == "not_cyberbullying") %>% count(word,sort = TRUE)
+words_gender <- words %>% filter(cyberbullying_type == "gender") %>% count(word,sort = TRUE)
+words_age <- words %>% filter(cyberbullying_type == "age") %>% count(word,sort = TRUE)
+words_ethnicity <- words %>% filter(cyberbullying_type == "ethnicity") %>% count(word,sort = TRUE)
+words_other <- words %>% filter(cyberbullying_type == "other_cyberbullying") %>% count(word,sort = TRUE)
+```
+
+```{r,echo=FALSE, fig.cap="Cyber Bullying Tweets: Gender",out.extra="",out.height="80%",out.width="80%",fig.align='center'}
+wordcloud(words = words_gender$word, freq = words_gender$n, min.freq = 1,          
+          max.words=200, random.order=FALSE, rot.per=0.35,           
+          random.color = TRUE,           
+          colors=pal)
+```
+```{r,echo=FALSE, fig.cap="Cyber Bullying Tweets: Ethnicity",out.extra="",out.height="80%",out.width="80%",fig.align='center'}
+wordcloud(words = words_ethnicity$word, freq = words_ethnicity$n, min.freq = 1,          
+          max.words=200, random.order=FALSE, rot.per=0.35,           
+          random.color = TRUE,           
+          colors=pal)
+```
+```{r,echo=FALSE, fig.cap="Cyber Bullying Tweets: Age",out.extra="",out.height="80%",out.width="80%",fig.align='center'}
+wordcloud(words = words_age$word, freq = words_age$n, min.freq = 1,          
+          max.words=200, random.order=FALSE, rot.per=0.35,           
+          random.color = TRUE,           
+          colors=pal)
+```
+```{r,echo=FALSE, fig.cap="Cyber Bullying Tweets: Other Cyber Bullying",out.extra="",out.height="80%",out.width="80%",fig.align='center'}
+wordcloud(words = words_other$word, freq = words_other$n, min.freq = 1,          
+          max.words=200, random.order=FALSE, rot.per=0.35,           
+          random.color = TRUE,           
+          colors=pal)
+```
+```{r,echo=FALSE, fig.cap="Cyber Bullying Tweets: Not Cyber Bullying",out.extra="",out.height="80%",out.width="80%",fig.align='center'}
+wordcloud(words = words_notcb$word, freq = words_notcb$n, min.freq = 1,          
+          max.words=200, random.order=FALSE, rot.per=0.35,           
+          random.color = TRUE,           
+          colors=pal)
+```
+
+
+```{r,echo=FALSE, fig.cap="Scree Plot for PCA",out.extra="",out.height="75%",out.width="75%",fig.align='center'}
+fviz_eig(pca, ncp =30)
+```
+
+```{r,echo=FALSE}
+kbl(as.data.frame(cmatrix_bayes$byClass) %>% select("Sensitivity","Specificity","Precision"),digits = 3,caption = "Naive Bayes Performance Measures by Class") %>% kable_styling(latex_options = c("hold_position"))
+
+```
+```{r,echo=FALSE}
+kbl(as.data.frame(cmatrix_forest$byClass) %>% select("Sensitivity","Specificity","Precision"),digits = 3,caption = "Random Forest Performance Measures by Class") %>% kable_styling(latex_options = c("hold_position"))
+
+```
+
+

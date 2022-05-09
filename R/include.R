@@ -31,7 +31,10 @@ librarian::shelf(
   stopwords,
   tm,
   wordcloud2,
-  wordcloud
+  wordcloud,
+  naivebayes,
+  randomForest,
+  textstem
 )
 
 # tell here where we are so we can use it elsewhere
